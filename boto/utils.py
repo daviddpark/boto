@@ -54,6 +54,8 @@ from email.MIMEBase import MIMEBase
 from email.MIMEText import MIMEText
 from email.Utils import formatdate
 from email import Encoders
+import gzip
+
 
 try:
     import hashlib
@@ -149,7 +151,10 @@ def get_aws_metadata(headers, provider=None):
     for hkey in headers.keys():
         if hkey.lower().startswith(metadata_prefix):
             val = urllib.unquote_plus(headers[hkey])
-            metadata[hkey[len(metadata_prefix):]] = unicode(val, 'utf-8')
+            try:
+                metadata[hkey[len(metadata_prefix):]] = unicode(val, 'utf-8')
+            except UnicodeDecodeError:
+                metadata[hkey[len(metadata_prefix):]] = val
             del headers[hkey]
     return metadata
 
@@ -196,7 +201,7 @@ def _get_instance_metadata(url):
                 d[key] = val
     return d
 
-def get_instance_metadata(version='latest'):
+def get_instance_metadata(version='latest', url='http://169.254.169.254'):
     """
     Returns the instance metadata as a nested Python dictionary.
     Simple values (e.g. local_hostname, hostname, etc.) will be
@@ -204,12 +209,12 @@ def get_instance_metadata(version='latest'):
     be stored in the dict as a list of string values.  More complex
     fields such as public-keys and will be stored as nested dicts.
     """
-    url = 'http://169.254.169.254/%s/meta-data/' % version
-    return _get_instance_metadata(url)
+    return _get_instance_metadata('%s/%s/meta-data/' % (url, version))
 
-def get_instance_userdata(version='latest', sep=None):
-    url = 'http://169.254.169.254/%s/user-data' % version
-    user_data = retry_url(url, retry_on_404=False)
+def get_instance_userdata(version='latest', sep=None,
+                          url='http://169.254.169.254'):
+    ud_url = '%s/%s/user-data' % (url,version)
+    user_data = retry_url(ud_url, retry_on_404=False)
     if user_data:
         if sep:
             l = user_data.split(sep)
@@ -220,6 +225,7 @@ def get_instance_userdata(version='latest', sep=None):
     return user_data
 
 ISO8601 = '%Y-%m-%dT%H:%M:%SZ'
+ISO8601_MS = '%Y-%m-%dT%H:%M:%S.%fZ'
     
 def get_ts(ts=None):
     if not ts:
@@ -227,7 +233,12 @@ def get_ts(ts=None):
     return time.strftime(ISO8601, ts)
 
 def parse_ts(ts):
-    return datetime.datetime.strptime(ts, ISO8601)
+    try:
+        dt = datetime.datetime.strptime(ts, ISO8601)
+        return dt
+    except ValueError:
+        dt = datetime.datetime.strptime(ts, ISO8601_MS)
+        return dt
 
 def find_class(module_name, class_name=None):
     if class_name:
@@ -607,3 +618,74 @@ def pythonize_name(name, sep='_'):
         else:
             s += c
     return s
+
+def write_mime_multipart(content, compress=False, deftype='text/plain', delimiter=':'):
+    """Description:
+    :param content: A list of tuples of name-content pairs. This is used
+    instead of a dict to ensure that scripts run in order
+    :type list of tuples:
+
+    :param compress: Use gzip to compress the scripts, defaults to no compression
+    :type bool:
+
+    :param deftype: The type that should be assumed if nothing else can be figured out
+    :type str:
+
+    :param delimiter: mime delimiter
+    :type str:
+
+    :return: Final mime multipart
+    :rtype: str:
+    """
+    wrapper = MIMEMultipart()
+    for name,con in content:
+        definite_type = guess_mime_type(con, deftype)
+        maintype, subtype = definite_type.split('/', 1)
+        if maintype == 'text':
+            mime_con = MIMEText(con, _subtype=subtype)
+        else:
+            mime_con = MIMEBase(maintype, subtype)
+            mime_con.set_payload(con)
+            # Encode the payload using Base64
+            Encoders.encode_base64(mime_con)
+        mime_con.add_header('Content-Disposition', 'attachment', filename=name)
+        wrapper.attach(mime_con)
+    rcontent = wrapper.as_string()
+
+    if compress:
+        buf = StringIO.StringIO()
+        gz = gzip.GzipFile(mode='wb', fileobj=buf)
+        try:
+            gz.write(rcontent)
+        finally:
+            gz.close()
+        rcontent = buf.getvalue()
+
+    return rcontent
+
+def guess_mime_type(content, deftype):
+    """Description: Guess the mime type of a block of text
+    :param content: content we're finding the type of
+    :type str:
+
+    :param deftype: Default mime type
+    :type str:
+
+    :rtype: <type>:
+    :return: <description>
+    """
+    #Mappings recognized by cloudinit
+    starts_with_mappings={
+        '#include' : 'text/x-include-url',
+        '#!' : 'text/x-shellscript',
+        '#cloud-config' : 'text/cloud-config',
+        '#upstart-job'  : 'text/upstart-job',
+        '#part-handler' : 'text/part-handler',
+        '#cloud-boothook' : 'text/cloud-boothook'
+    }
+    rtype = deftype
+    for possible_type,mimetype in starts_with_mappings.items():
+        if content.startswith(possible_type):
+            rtype = mimetype
+            break
+    return(rtype)

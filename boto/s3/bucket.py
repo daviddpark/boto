@@ -443,11 +443,12 @@ class Bucket(object):
         """
         return self.key_class(self, key_name)
 
-    def generate_url(self, expires_in, method='GET',
-                     headers=None, force_http=False):
+    def generate_url(self, expires_in, method='GET', headers=None,
+                     force_http=False, response_headers=None):
         return self.connection.generate_url(expires_in, method, self.name,
                                             headers=headers,
-                                            force_http=force_http)
+                                            force_http=force_http,
+                                            response_headers=response_headers)
 
     def delete_key(self, key_name, headers=None,
                    version_id=None, mfa_token=None):
@@ -683,8 +684,8 @@ class Bucket(object):
             for key in self:
                 key.add_email_grant(permission, email_address, headers=headers)
 
-    def add_user_grant(self, permission, user_id,
-                       recursive=False, headers=None):
+    def add_user_grant(self, permission, user_id, recursive=False,
+                       headers=None, display_name=None):
         """
         Convenience method that provides a quick way to add a canonical
         user grant to a bucket.  This method retrieves the current ACL,
@@ -707,16 +708,22 @@ class Bucket(object):
                           in the bucket and apply the same grant to each key.
                           CAUTION: If you have a lot of keys, this could take
                           a long time!
+                          
+        :type display_name: string
+        :param display_name: An option string containing the user's
+                             Display Name.  Only required on Walrus.
         """
         if permission not in S3Permissions:
             raise self.connection.provider.storage_permissions_error(
                 'Unknown Permission: %s' % permission)
         policy = self.get_acl(headers=headers)
-        policy.acl.add_user_grant(permission, user_id)
+        policy.acl.add_user_grant(permission, user_id,
+                                  display_name=display_name)
         self.set_acl(policy, headers=headers)
         if recursive:
             for key in self:
-                key.add_user_grant(permission, user_id, headers=headers)
+                key.add_user_grant(permission, user_id, headers=headers,
+                                   display_name=display_name)
 
     def list_grants(self, headers=None):
         policy = self.get_acl(headers=headers)
@@ -811,8 +818,7 @@ class Bucket(object):
         """
         Configure versioning for this bucket.
         
-        ..note:: This feature is currently in beta release and is available
-                 only in the Northern California region.
+        ..note:: This feature is currently in beta.
                  
         :type versioning: bool
         :param versioning: A boolean indicating whether version is
@@ -996,6 +1002,19 @@ class Bucket(object):
         else:
             raise self.connection.provider.storage_response_error(
                 response.status, response.reason, body)
+
+    def delete_policy(self, headers=None):
+        response = self.connection.make_request('DELETE', self.name,
+                                                data='/?policy',
+                                                query_args='policy',
+                                                headers=headers)
+        body = response.read()
+        if response.status >= 200 and response.status <= 204:
+            return True
+        else:
+            raise self.connection.provider.storage_response_error(
+                response.status, response.reason, body)
+        
 
     def initiate_multipart_upload(self, key_name, headers=None,
             reduced_redundancy=False, metadata=None):

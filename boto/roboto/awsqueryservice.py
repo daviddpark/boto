@@ -6,6 +6,12 @@ import boto.jsonresponse
 import boto.exception
 import awsqueryrequest
 
+class NoCredentialsError(boto.exception.BotoClientError):
+
+    def __init__(self):
+        s = 'Unable to find credentials'
+        boto.exception.BotoClientError.__init__(self, s)
+
 class AWSQueryService(boto.connection.AWSQueryConnection):
 
     Name = ''
@@ -38,8 +44,7 @@ class AWSQueryService(boto.connection.AWSQueryConnection):
             boto.connection.AWSQueryConnection.__init__(self, **self.args)
             self.aws_response = None
         except boto.exception.NoAuthHandlerFound:
-            msg = 'Unable to find credentials'
-            raise boto.exception.BotoClientError(msg)
+            raise NoCredentialsError()
 
     def check_for_credential_file(self):
         """
@@ -83,7 +88,6 @@ class AWSQueryService(boto.connection.AWSQueryConnection):
         url = self.args.get('url', None)
         if url:
             del self.args['url']
-        # TODO: move EUARE_URL to class variable
         if not url and self.EnvURL in os.environ:
             url = os.environ[self.EnvURL]
         if url:

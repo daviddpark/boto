@@ -34,8 +34,8 @@ import boto.plugin
 import boto.utils
 import hmac
 import sys
-import time
 import urllib
+from email.utils import formatdate
 
 from boto.auth_handler import AuthHandler
 from boto.exception import BotoClientError
@@ -111,8 +111,7 @@ class HmacAuthV1Handler(AuthHandler, HmacKeys):
         method = http_request.method
         auth_path = http_request.auth_path
         if not headers.has_key('Date'):
-            headers['Date'] = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
-                                            time.gmtime())
+            headers['Date'] = formatdate(usegmt=True)
 
         c_string = boto.utils.canonical_string(method, auth_path, headers,
                                                None, self._provider)
@@ -136,8 +135,7 @@ class HmacAuthV2Handler(AuthHandler, HmacKeys):
     def add_auth(self, http_request, **kwargs):
         headers = http_request.headers
         if not headers.has_key('Date'):
-            headers['Date'] = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
-                                            time.gmtime())
+            headers['Date'] = formatdate(usegmt=True)
 
         b64_hmac = self.sign_string(headers['Date'])
         auth_hdr = self._provider.auth_header
@@ -157,8 +155,7 @@ class HmacAuthV3Handler(AuthHandler, HmacKeys):
     def add_auth(self, http_request, **kwargs):
         headers = http_request.headers
         if not headers.has_key('Date'):
-            headers['Date'] = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
-                                            time.gmtime())
+            headers['Date'] = formatdate(usegmt=True)
 
         b64_hmac = self.sign_string(headers['Date'])
         s = "AWS3-HTTPS AWSAccessKeyId=%s," % self._provider.access_key
@@ -184,15 +181,16 @@ class QuerySignatureHelper(HmacKeys):
         if http_request.method == 'POST':
             headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
             http_request.body = qs + '&Signature=' + urllib.quote(signature)
+            http_request.headers['Content-Length'] = str(len(http_request.body))
         else:
             http_request.body = ''
+            # if this is a retried request, the qs from the previous try will
+            # already be there, we need to get rid of that and rebuild it
+            http_request.path = http_request.path.split('?')[0]
             http_request.path = (http_request.path + '?' + qs + '&Signature=' + urllib.quote(signature))
-        # Now that query params are part of the path, clear the 'params' field
-        # in request.
-        http_request.params = {}
 
 class QuerySignatureV0AuthHandler(QuerySignatureHelper, AuthHandler):
-    """Class SQS query signature based Auth handler."""
+    """Provides Signature V0 Signing"""
 
     SignatureVersion = 0
     capability = ['sign-v0']
@@ -206,7 +204,7 @@ class QuerySignatureV0AuthHandler(QuerySignatureHelper, AuthHandler):
         keys.sort(cmp = lambda x, y: cmp(x.lower(), y.lower()))
         pairs = []
         for key in keys:
-            val = bot.utils.get_utf8_value(params[key])
+            val = boto.utils.get_utf8_value(params[key])
             pairs.append(key + '=' + urllib.quote(val))
         qs = '&'.join(pairs)
         return (qs, base64.b64encode(hmac.digest()))
@@ -238,7 +236,7 @@ class QuerySignatureV2AuthHandler(QuerySignatureHelper, AuthHandler):
 
     SignatureVersion = 2
     capability = ['sign-v2', 'ec2', 'ec2', 'emr', 'fps', 'ecs',
-                  'sdb', 'iam', 'rds', 'sns', 'sqs']
+                  'sdb', 'iam', 'rds', 'sns', 'sqs', 'cloudformation']
 
     def _calc_signature(self, params, verb, path, server_name):
         boto.log.debug('using _calc_signature_2')

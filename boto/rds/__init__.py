@@ -38,21 +38,34 @@ def regions():
     :return: A list of :class:`boto.rds.regioninfo.RDSRegionInfo`
     """
     return [RDSRegionInfo(name='us-east-1',
-                          endpoint='rds.amazonaws.com'),
+                          endpoint='rds.us-east-1.amazonaws.com'),
             RDSRegionInfo(name='eu-west-1',
-                          endpoint='eu-west-1.rds.amazonaws.com'),
+                          endpoint='rds.eu-west-1.amazonaws.com'),
             RDSRegionInfo(name='us-west-1',
-                          endpoint='us-west-1.rds.amazonaws.com'),
+                          endpoint='rds.us-west-1.amazonaws.com'),
             RDSRegionInfo(name='ap-northeast-1',
-                          endpoint='ap-northeast-1.rds.amazonaws.com'),
+                          endpoint='rds.ap-northeast-1.amazonaws.com'),
             RDSRegionInfo(name='ap-southeast-1',
-                          endpoint='ap-southeast-1.rds.amazonaws.com')
+                          endpoint='rds.ap-southeast-1.amazonaws.com')
             ]
 
-def connect_to_region(region_name):
+def connect_to_region(region_name, **kw_params):
+    """
+    Given a valid region name, return a 
+    :class:`boto.ec2.connection.EC2Connection`.
+    Any additional parameters after the region_name are passed on to
+    the connect method of the region object.
+
+    :type: str
+    :param region_name: The name of the region to connect to.
+
+    :rtype: :class:`boto.ec2.connection.EC2Connection` or ``None``
+    :return: A connection to the given region, or None if an invalid region
+             name is given
+    """
     for region in regions():
         if region.name == region_name:
-            return region.connect()
+            return region.connect(**kw_params)
     return None
 
 #boto.set_stream_logger('rds')
@@ -237,7 +250,7 @@ class RDSConnection(AWSQueryConnection):
             params['AvailabilityZone'] = availability_zone
         if preferred_maintenance_window:
             params['PreferredMaintenanceWindow'] = preferred_maintenance_window
-        if backup_retention_period:
+        if backup_retention_period is not None:
             params['BackupRetentionPeriod'] = backup_retention_period
         if preferred_backup_window:
             params['PreferredBackupWindow'] = preferred_backup_window
@@ -408,7 +421,7 @@ class RDSConnection(AWSQueryConnection):
             params['AllocatedStorage'] = allocated_storage
         if instance_class:
             params['DBInstanceClass'] = instance_class
-        if backup_retention_period:
+        if backup_retention_period is not None:
             params['BackupRetentionPeriod'] = backup_retention_period
         if preferred_backup_window:
             params['PreferredBackupWindow'] = preferred_backup_window

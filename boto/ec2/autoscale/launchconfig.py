@@ -120,10 +120,12 @@ class LaunchConfiguration(object):
         :param ramdisk_id: RAM disk id for instance
 
         :type block_device_mappings: list
-        :param block_device_mappings: Specifies how block devices are exposed for instances
+        :param block_device_mappings: Specifies how block devices are exposed
+                                      for instances
 
         :type instance_monitoring: bool
-        :param instance_monitoring: Whether instances in group are launched with detailed monitoring.
+        :param instance_monitoring: Whether instances in group are launched
+                                    with detailed monitoring.
         """
         self.connection = connection
         self.name = name
@@ -164,7 +166,10 @@ class LaunchConfiguration(object):
         elif name == 'ImageId':
             self.image_id = value
         elif name == 'CreatedTime':
-            self.created_time = datetime.strptime(value, '%Y-%m-%dT%H:%M:%S.%fZ')
+            try:
+                self.created_time = datetime.strptime(value, '%Y-%m-%dT%H:%M:%S.%fZ')
+            except ValueError:
+                self.created_time = datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ')
         elif name == 'KernelId':
             self.kernel_id = value
         elif name == 'RamdiskId':

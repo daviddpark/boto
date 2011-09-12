@@ -28,7 +28,7 @@ from boto.sdb.db.model import Model
 from boto.sdb.db.blob import Blob
 from boto.sdb.db.property import ListProperty, MapProperty
 from datetime import datetime, date, time
-from boto.exception import SDBPersistenceError
+from boto.exception import SDBPersistenceError, S3ResponseError
 
 ISO8601 = '%Y-%m-%dT%H:%M:%SZ'
 
@@ -97,6 +97,7 @@ class SDBConverter(object):
         return self.encode_map(prop, values)
 
     def encode_map(self, prop, value):
+        import urllib
         if value == None:
             return None
         if not isinstance(value, dict):
@@ -108,7 +109,7 @@ class SDBConverter(object):
                 item_type = Model
             encoded_value = self.encode(item_type, value[key])
             if encoded_value != None:
-                new_value.append('%s:%s' % (key, encoded_value))
+                new_value.append('%s:%s' % (urllib.quote(key), encoded_value))
         return new_value
 
     def encode_prop(self, prop, value):
@@ -148,9 +149,11 @@ class SDBConverter(object):
 
     def decode_map_element(self, item_type, value):
         """Decode a single element for a map"""
+        import urllib
         key = value
         if ":" in value:
             key, value = value.split(':',1)
+            key = urllib.unquote(key)
         if Model in item_type.mro():
             value = item_type(id=value)
         else:
@@ -337,7 +340,12 @@ class SDBConverter(object):
         if match:
             s3 = self.manager.get_s3_connection()
             bucket = s3.get_bucket(match.group(1), validate=False)
-            key = bucket.get_key(match.group(2))
+            try:
+                key = bucket.get_key(match.group(2))
+            except S3ResponseError, e:
+                if e.reason != "Forbidden":
+                    raise
+                return None
         else:
             return None
         if key:
@@ -533,6 +541,10 @@ class SDBManager(object):
         """
         import types
         query_parts = []
+
+        if select:
+            query_parts.append("(%s)" % select)
+
         order_by_filtered = False
         if order_by:
             if order_by[0] == "-":
@@ -541,7 +553,7 @@ class SDBManager(object):
             else:
                 order_by_method = "ASC";
         if isinstance(filters, str) or isinstance(filters, unicode):
-            query = "WHERE `__type__` = '%s' AND %s" % (cls.__name__, filters)
+            query = "WHERE %s AND `__type__` = '%s'" % (filters, cls.__name__)
             if order_by != None:
                 query += " ORDER BY `%s` %s" % (order_by, order_by_method)
             return query
@@ -588,9 +600,6 @@ class SDBManager(object):
             if not order_by_filtered:
                 query_parts.append("`%s` LIKE '%%'" % order_by)
             order_by_query = " ORDER BY `%s` %s" % (order_by, order_by_method)
-
-        if select:
-            query_parts.append("(%s)" % select)
 
         if len(query_parts) > 0:
             return "WHERE %s %s" % (" AND ".join(query_parts), order_by_query)
@@ -651,6 +660,7 @@ class SDBManager(object):
         self.domain.delete_attributes(obj.id)
 
     def set_property(self, prop, obj, name, value):
+        setattr(obj, name, value)
         value = prop.get_value_for_datastore(obj)
         value = self.encode_value(prop, value)
         if prop.unique:
